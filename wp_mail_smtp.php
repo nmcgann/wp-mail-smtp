@@ -42,14 +42,17 @@ define('WPMS_SMTP_ENCRYPTION_KEY', 'key'); //key to reversibly encrypt SMTP pass
 ////////////////////////////////////////////////////////////////////////////////
 class WPMS_Simple_Encryption{
 //From: http://stackoverflow.com/questions/9262109/simplest-two-way-encryption-using-php
-// This is an implementation of "Portable Data Encryption in PHP"
+// This is an implementation of "Portable Data Encryption in PHP" answer.
+// The more complicated version with the MAC checking is used as it avoids mistaking
+// a non-encrypted password for an encrypted one and giving a garbled decryption.
+// Shows ***DECRYPT ERROR*** if the checks fail.
+    
     const HASH_CIPHER = 'sha256';
     const ENCRYPTION_CIPHER = 'aes-256-ctr';
         
     private static function raw_encrypt($message, $key){
 
         $ivsize = openssl_cipher_iv_length( self::ENCRYPTION_CIPHER );
-
         $iv = openssl_random_pseudo_bytes($ivsize);
 
         $ciphertext = openssl_encrypt(
@@ -343,9 +346,9 @@ function phpmailer_init_smtp($phpmailer) {
 				$phpmailer->Username = get_option('smtp_user');
 
                 $saved_password = get_option('smtp_pass');
-                if(get_option('smtp_encryption_key_enabled') == '1' && WPMS_Simple_Encryption::get_and_check_key() !== false){
-                    $decoded = WPMS_Simple_Encryption::decrypt($saved_password, WPMS_Simple_Encryption::get_and_check_key());
-                     if($decoded === false){ 
+                if( get_option('smtp_encryption_key_enabled') == '1' && WPMS_Simple_Encryption::get_and_check_key() !== false ){
+                    $decoded = WPMS_Simple_Encryption::decrypt( $saved_password, WPMS_Simple_Encryption::get_and_check_key() );
+                     if( $decoded === false ){ 
                         $saved_password = "";
                     }else{
                         $saved_password = $decoded;
@@ -363,9 +366,9 @@ function phpmailer_init_smtp($phpmailer) {
             $phpmailer->Username = get_option('pepipost_user');
             
             $saved_password = get_option('pepipost_pass');
-            if(get_option('smtp_encryption_key_enabled') == '1' && WPMS_Simple_Encryption::get_and_check_key() !== false){
-                $decoded = WPMS_Simple_Encryption::decrypt($saved_password, WPMS_Simple_Encryption::get_and_check_key());
-                 if($decoded === false){ 
+            if( get_option( 'smtp_encryption_key_enabled' ) == '1' && WPMS_Simple_Encryption::get_and_check_key() !== false ){
+                $decoded = WPMS_Simple_Encryption::decrypt( $saved_password, WPMS_Simple_Encryption::get_and_check_key() );
+                 if( $decoded === false ){ 
                     $saved_password = "";
                 }else{
                     $saved_password = $decoded;
