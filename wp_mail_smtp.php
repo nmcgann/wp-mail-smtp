@@ -180,6 +180,9 @@ class WPMS_Simple_Encryption{
         }
         //hook to encrypt saved passwords on settings form
         add_action( 'whitelist_options', array(__CLASS__, 'encrypt_post_vars') );
+        //notices
+        add_action( 'admin_notices', array( __CLASS__, 'message_check_encryption' ) );
+
     }
     
     public static function message_check_encryption(){
@@ -204,13 +207,13 @@ class WPMS_Simple_Encryption{
             
             if(isset( $_POST['smtp_pass'] ) ){
                 if( get_option( 'smtp_encryption_key_enabled' ) == '1' && self::$encryption_key !== false ){
-                    $_POST['smtp_pass'] = self::encrypt( $_POST['smtp_pass'], self::get_and_check_key() );
+                    $_POST['smtp_pass'] = self::encrypt( trim( $_POST['smtp_pass'] ), self::get_and_check_key() );
                 }
             }
             
             if(isset( $_POST['pepipost_pass'] ) ){
                 if( get_option( 'smtp_encryption_key_enabled' ) == '1' && self::$encryption_key !== false ){
-                    $_POST['pepipost_pass'] = self::encrypt( $_POST['pepipost_pass'], self::get_and_check_key() );
+                    $_POST['pepipost_pass'] = self::encrypt( trim( $_POST['pepipost_pass'] ), self::get_and_check_key() );
                 }
             }
             
@@ -220,7 +223,6 @@ class WPMS_Simple_Encryption{
 }
 
 add_action( 'admin_init', 'WPMS_Simple_Encryption::init_check_encryption' );
-add_action( 'admin_notices', 'WPMS_Simple_Encryption::message_check_encryption' );
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -442,9 +444,14 @@ function wp_mail_smtp_options_page() {
 <p><?php _e('The result was:', 'wp_mail_smtp'); ?></p>
 <pre><?php var_dump($result); ?></pre>
 <p><?php _e('The full debugging output is shown below:', 'wp_mail_smtp'); ?></p>
-<pre><?php var_dump($phpmailer); ?></pre>
+<pre><?php //escape html output otherwise things that look like tags are swallowed
+        ob_start();
+        var_dump($phpmailer);
+        $php_mailer_out = ob_get_clean();
+        esc_html_e($php_mailer_out);
+     ?></pre>
 <p><?php _e('The SMTP debugging output is shown below:', 'wp_mail_smtp'); ?></p>
-<pre><?php echo $smtp_debug ?></pre>
+<pre><?php esc_html_e($smtp_debug); ?></pre>
 </div>
 		<?php
 
@@ -462,13 +469,13 @@ function wp_mail_smtp_options_page() {
 <table class="optiontable form-table">
 <tr valign="top">
 <th scope="row"><label for="mail_from"><?php _e('From Email', 'wp_mail_smtp'); ?></label></th>
-<td><input name="mail_from" type="text" id="mail_from" value="<?php print(get_option('mail_from')); ?>" size="40" class="regular-text" />
+<td><input name="mail_from" type="text" id="mail_from" value="<?php esc_attr_e(get_option('mail_from')); ?>" size="40" class="regular-text" />
 <p class="description"><?php _e('You can specify the email address that emails should be sent from. If you leave this blank, the default email will be used.', 'wp_mail_smtp'); if(get_option('db_version') < 6124) { print('<br /><span style="color: red;">'); _e('<strong>Please Note:</strong> You appear to be using a version of WordPress prior to 2.3. Please ignore the From Name field and instead enter Name&lt;email@domain.com&gt; in this field.', 'wp_mail_smtp'); print('</span>'); } ?></p>
 </td>
 </tr>
 <tr valign="top">
 <th scope="row"><label for="mail_from_name"><?php _e('From Name', 'wp_mail_smtp'); ?></label></th>
-<td><input name="mail_from_name" type="text" id="mail_from_name" value="<?php print(get_option('mail_from_name')); ?>" size="40" class="regular-text" />
+<td><input name="mail_from_name" type="text" id="mail_from_name" value="<?php esc_attr_e(get_option('mail_from_name')); ?>" size="40" class="regular-text" />
 <p class="description"><?php _e('You can specify the name that emails should be sent from. If you leave this blank, the emails will be sent from WordPress.', 'wp_mail_smtp'); ?></p>
 </td>
 </tr>
@@ -511,11 +518,11 @@ function wp_mail_smtp_options_page() {
 <table class="optiontable form-table">
 <tr valign="top">
 <th scope="row"><label for="smtp_host"><?php _e('SMTP Host', 'wp_mail_smtp'); ?></label></th>
-<td><input name="smtp_host" type="text" id="smtp_host" value="<?php print(get_option('smtp_host')); ?>" size="40" class="regular-text" /></td>
+<td><input name="smtp_host" type="text" id="smtp_host" value="<?php esc_attr_e(get_option('smtp_host')); ?>" size="40" class="regular-text" /></td>
 </tr>
 <tr valign="top">
 <th scope="row"><label for="smtp_port"><?php _e('SMTP Port', 'wp_mail_smtp'); ?></label></th>
-<td><input name="smtp_port" type="text" id="smtp_port" value="<?php print(get_option('smtp_port')); ?>" size="6" class="regular-text" /></td>
+<td><input name="smtp_port" type="text" id="smtp_port" value="<?php esc_attr_e(get_option('smtp_port')); ?>" size="6" class="regular-text" /></td>
 </tr>
 <tr valign="top">
 <th scope="row"><?php _e('Encryption', 'wp_mail_smtp'); ?> </th>
@@ -546,7 +553,7 @@ function wp_mail_smtp_options_page() {
 </tr>
 <tr valign="top">
 <th scope="row"><label for="smtp_user"><?php _e('Username', 'wp_mail_smtp'); ?></label></th>
-<td><input name="smtp_user" type="text" id="smtp_user" value="<?php print(get_option('smtp_user')); ?>" size="40" class="code" /></td>
+<td><input name="smtp_user" type="text" id="smtp_user" value="<?php esc_attr_e(get_option('smtp_user')); ?>" size="40" class="code" /></td>
 </tr>
 <tr valign="top">
 <th scope="row"><label for="smtp_pass"><?php _e('Password', 'wp_mail_smtp'); ?></label></th>
@@ -569,7 +576,7 @@ function wp_mail_smtp_options_page() {
         }
     }
     ?>
-  <input name="smtp_pass" type="<?php print($password_field_type); ?>" id="smtp_pass" value="<?php print($saved_password); ?>" size="40" class="code" />
+  <input name="smtp_pass" type="<?php esc_attr_e($password_field_type); ?>" id="smtp_pass" value="<?php esc_attr_e($saved_password); ?>" size="40" class="code" />
   <?php if($password_field_type == "text"): ?>
   <p class="description"><?php printf(esc_html__('This is stored in plain text as reversible password encryption is not enabled. For more information, click %1$shere%2$s'), '<a href="">', '</a>'); ?>.</p>
   <?php else: ?>
@@ -588,7 +595,7 @@ function wp_mail_smtp_options_page() {
   <table class="optiontable form-table">
     <tr valign="top">
       <th scope="row"><label for="pepipost_user"><?php _e('Username', 'wp_mail_smtp'); ?></label></th>
-      <td><input name="pepipost_user" type="text" id="pepipost_user" value="<?php print(get_option('pepipost_user')); ?>" size="40" class="code" /></td>
+      <td><input name="pepipost_user" type="text" id="pepipost_user" value="<?php esc_attr_e(get_option('pepipost_user')); ?>" size="40" class="code" /></td>
     </tr>
     <tr valign="top">
       <th scope="row"><label for="pepipost_pass"><?php _e('Password', 'wp_mail_smtp'); ?></label></th>
@@ -611,11 +618,11 @@ function wp_mail_smtp_options_page() {
         }
     }
     ?>
-      <td><input name="pepipost_pass" type="<?php print($password_field_type); ?>" id="pepipost_pass" value="<?php print($saved_password); ?>" size="40" class="code" /></td>
+      <td><input name="pepipost_pass" type="<?php esc_attr_e($password_field_type); ?>" id="pepipost_pass" value="<?php esc_attr_e($saved_password); ?>" size="40" class="code" /></td>
     </tr>
 		<tr valign="top">
 			<th scope="row"><label for="pepipost_port"><?php _e('SMTP Port', 'wp_mail_smtp'); ?></label></th>
-			<td><input name="pepipost_port" type="text" id="pepipost_port" value="<?php print(get_option('pepipost_port')); ?>" size="6" class="regular-text" /></td>
+			<td><input name="pepipost_port" type="text" id="pepipost_port" value="<?php esc_attr_e(get_option('pepipost_port')); ?>" size="6" class="regular-text" /></td>
 		</tr>
 		<tr valign="top">
 			<th scope="row"><?php _e('Encryption', 'wp_mail_smtp'); ?> </th>
@@ -709,9 +716,10 @@ function wp_mail_smtp_mail_from ($orig) {
 
 	// This is copied from pluggable.php lines 348-354 as at revision 10150
 	// http://trac.wordpress.org/browser/branches/2.7/wp-includes/pluggable.php#L348
-
+    //issue #2 on github
+    $server_name = isset( $_SERVER['SERVER_NAME'] ) ? $_SERVER['SERVER_NAME'] : 'no-server-name-found';
 	// Get the site domain and get rid of www.
-	$sitename = strtolower( $_SERVER['SERVER_NAME'] );
+	$sitename = strtolower( $server_name );
 	if ( substr( $sitename, 0, 4 ) == 'www.' ) {
 		$sitename = substr( $sitename, 4 );
 	}
