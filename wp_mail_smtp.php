@@ -34,7 +34,180 @@ define('WPMS_SSL', ''); // Possible values '', 'ssl', 'tls' - note TLS is not ST
 define('WPMS_SMTP_AUTH', true); // True turns on SMTP authentication, false turns it off
 define('WPMS_SMTP_USER', 'username'); // SMTP authentication username, only used if WPMS_SMTP_AUTH is true
 define('WPMS_SMTP_PASS', 'password'); // SMTP authentication password, only used if WPMS_SMTP_AUTH is true
+//option that works independently
+define('WPMS_SMTP_ENCRYPTION_KEY', 'key'); //key to reversibly encrypt SMTP passwords before saving in WP db.
 */
+
+////////////////////////////////////////////////////////////////////////////////
+class WPMS_Simple_Encryption{
+    
+    const HASH_CIPHER = 'sha256';
+    const ENCRYPTION_CIPHER = 'aes-256-ctr';
+        
+    private static function raw_encrypt($message, $key){
+
+        $ivsize = openssl_cipher_iv_length( self::ENCRYPTION_CIPHER );
+
+        $iv = openssl_random_pseudo_bytes($ivsize);
+
+        $ciphertext = openssl_encrypt(
+            $message,
+            self::ENCRYPTION_CIPHER,
+            $key,
+            OPENSSL_RAW_DATA,
+            $iv
+        );
+
+        return ($iv . $ciphertext);
+    }
+
+    public static function encrypt($message, $key){
+        list ($enc_key, $auth_key) = self::split_key($key);
+
+        $ciphertext = self::raw_encrypt($message, $enc_key);
+        $mac = hash_hmac(self::HASH_CIPHER, $ciphertext, $auth_key, true);
+        
+        return base64_encode( $mac . $ciphertext );
+        
+    }
+    
+    private static function split_key($key){
+        return array(
+            hash_hmac(self::HASH_CIPHER, 'ENCRYPTION', $key, true),
+            hash_hmac(self::HASH_CIPHER, 'AUTHENTICATION', $key, true),
+        );
+    }
+
+    //timing-safe comparison
+    private static function hash_equals($a, $b){
+        $nonce = openssl_random_pseudo_bytes(32);
+        return hash_hmac(self::HASH_CIPHER, $a, $nonce) === hash_hmac(self::HASH_CIPHER, $b, $nonce);
+    }
+    
+    private static $openssl_warning = false;
+    
+    public static function error_handler($errno, $errstr, $errfile, $errline)
+    {
+        switch ($errno) {
+            case E_WARNING :
+                //echo "<b>My WARNING</b> [$errno] $errstr<br />\n";
+                self::$openssl_warning = true;
+                break;
+             default:
+                //standard error handler
+                return false;
+        }
+
+        // Don't execute PHP internal error handler
+        return true;
+    }
+    
+    private static function raw_decrypt($message, $key){
+
+        $ivsize = openssl_cipher_iv_length(self::ENCRYPTION_CIPHER);
+
+        $iv = substr($message, 0,  $ivsize);
+        $ciphertext = substr($message, $ivsize);
+        
+        // set to the user defined error handler to catch warnings
+        set_error_handler(array(__CLASS__, 'error_handler'));
+        self::$openssl_warning = false;
+
+        $decrypted = openssl_decrypt(
+            $ciphertext,
+            self::ENCRYPTION_CIPHER,
+            $key,
+            OPENSSL_RAW_DATA,
+            $iv
+        );
+        
+        restore_error_handler();
+        
+        if($decrypted === false || self::$openssl_warning){
+            return false;
+        }
+        
+        return $decrypted;
+    }
+    
+    public static function decrypt($message, $key){
+        list ($enc_key, $auth_key) = self::split_key($key);
+        
+        $message = @base64_decode($message);
+        if($message === false){
+            return false;
+        }
+
+        $hash_size = strlen( hash(self::HASH_CIPHER, '', true) );
+        $mac = substr($message, 0, $hash_size);
+        $ciphertext = substr($message, $hash_size);
+        
+        $calculated = hash_hmac(self::HASH_CIPHER, $ciphertext, $auth_key, true);
+        
+        if(!self::hash_equals($mac, $calculated)){
+            return false;
+        }
+        
+        return self::raw_decrypt($ciphertext, $enc_key);
+    }
+    
+    //end of cipher routines - plugin usage below
+    
+    public static $encryption_key = '';
+    
+    public static function get_and_check_key(){
+        if( defined('WPMS_SMTP_ENCRYPTION_KEY') && 
+            trim(WPMS_SMTP_ENCRYPTION_KEY) != '' &&
+            ctype_print(WPMS_SMTP_ENCRYPTION_KEY) &&
+            strlen(WPMS_SMTP_ENCRYPTION_KEY) >= 32){
+            return WPMS_SMTP_ENCRYPTION_KEY;
+        }
+        return false;
+    }
+    
+    public static function init_check_encryption(){
+        self::$encryption_key = self::get_and_check_key();
+        
+        if( self::$encryption_key === false ) {
+            update_option( 'smtp_encryption_key_enabled', '0' );
+        }
+        
+        add_action( 'whitelist_options', array(__CLASS__, 'encrypt_post_vars') );
+    }
+    
+    public static function message_check_encryption(){
+        if( self::$encryption_key === false ){
+            $msg = __( '<strong>No suitable WP Mail SMTP Password Encryption Key set in wp-config.php. Cannot encrypt passwords to be saved in database; plaintext will be used. A suitable password can be any wp salt from https://api.wordpress.org/secret-key/1.1/salt/.</strong>', 'wp_mail_smtp' );
+            ?>
+            <div class="notice notice-error"><p><?php echo $msg;?></p></div>
+            <?php
+        }
+        if( get_option( 'smtp_encryption_key_enabled' ) != '1' ){
+            $msg = __( '<strong>WP Mail SMTP Password Encryption Key is not enabled. Cannot decrypt passwords saved in database; plaintext will be used. De-activate and re-activate plugin to enable once encryption key is set in wp-config.php.</strong>', 'wp_mail_smtp' );
+            ?>
+            <div class="notice notice-error"><p><?php echo $msg;?></p></div>
+            <?php            
+        }
+    }
+    
+    public static function encrypt_post_vars( $whitelist ){
+        //this filter is called in the options.php script and is the only chance to modify $_POST vars
+        //as there are no other hooks
+        if( isset( $_POST['action'] ) && $_POST['action'] == 'update' ){
+            if(isset( $_POST['smtp_pass'] ) ){
+                if( get_option( 'smtp_encryption_key_enabled' ) == '1' && self::$encryption_key !== false ){
+                    $_POST['smtp_pass'] = self::encrypt( $_POST['smtp_pass'], self::get_and_check_key() );
+                }
+            }
+        }
+        return $whitelist;
+    }
+}
+
+add_action( 'admin_init', 'WPMS_Simple_Encryption::init_check_encryption' );
+add_action( 'admin_notices', 'WPMS_Simple_Encryption::message_check_encryption' );
+
+////////////////////////////////////////////////////////////////////////////////
 
 // Array of options and their default values
 global $wpms_options; // This is horrible, should be cleaned up at some point
@@ -52,7 +225,8 @@ $wpms_options = array (
 	'pepipost_user' => '',
 	'pepipost_pass' => '',
 	'pepipost_port' => '2525',
-	'pepipost_ssl' => 'none'
+	'pepipost_ssl' => 'none',
+    //('smtp_encryption_key_enabled' not included here - not passed in POST variables)
 );
 
 
@@ -68,7 +242,12 @@ function wp_mail_smtp_activate() {
 	foreach ($wpms_options as $name => $val) {
 		add_option($name,$val);
 	}
-
+    
+    //can't include option in $wpms_options as it gets cleared on POST
+    add_option('smtp_encryption_key_enabled', '0');
+    if(WPMS_Simple_Encryption::get_and_check_key() !== false){
+        update_option('smtp_encryption_key_enabled', '1');
+    }
 }
 endif;
 
@@ -120,10 +299,10 @@ function phpmailer_init_smtp($phpmailer) {
 			return;
 		}
 
-    // If the mailer is pepipost, make sure we have a username and password
-    if (get_option('mailer') == 'pepipost' && (! get_option('pepipost_user') && ! get_option('pepipost_pass'))) {
-      return;
-    }
+        // If the mailer is pepipost, make sure we have a username and password
+        if (get_option('mailer') == 'pepipost' && (! get_option('pepipost_user') && ! get_option('pepipost_pass'))) {
+          return;
+        }
 
 		// Set the mailer type as per config above, this overrides the already called isMail method
 		$phpmailer->Mailer = get_option('mailer');
@@ -149,17 +328,27 @@ function phpmailer_init_smtp($phpmailer) {
 			if (get_option('smtp_auth') == "true") {
 				$phpmailer->SMTPAuth = TRUE;
 				$phpmailer->Username = get_option('smtp_user');
-				$phpmailer->Password = get_option('smtp_pass');
+
+                $saved_password = get_option('smtp_pass');
+                if(get_option('smtp_encryption_key_enabled') == '1' && WPMS_Simple_Encryption::get_and_check_key() !== false){
+                    $decoded = WPMS_Simple_Encryption::decrypt($saved_password, WPMS_Simple_Encryption::get_and_check_key());
+                     if($decoded === false){ 
+                        $saved_password = "";
+                    }else{
+                        $saved_password = $decoded;
+                    }
+                }
+				$phpmailer->Password = $saved_password;
 			}
 		} elseif (get_option('mailer') == 'pepipost') {
-      // Set the Pepipost settings
-      $phpmailer->Mailer = 'smtp';
-      $phpmailer->Host = 'smtp.pepipost.com';
-      $phpmailer->Port = get_option('pepipost_port');
-      $phpmailer->SMTPSecure = get_option('pepipost_ssl') == 'none' ? '' : get_option('pepipost_ssl');;
-      $phpmailer->SMTPAuth = TRUE;
-      $phpmailer->Username = get_option('pepipost_user');
-      $phpmailer->Password = get_option('pepipost_pass');
+            // Set the Pepipost settings
+            $phpmailer->Mailer = 'smtp';
+            $phpmailer->Host = 'smtp.pepipost.com';
+            $phpmailer->Port = get_option('pepipost_port');
+            $phpmailer->SMTPSecure = get_option('pepipost_ssl') == 'none' ? '' : get_option('pepipost_ssl');;
+            $phpmailer->SMTPAuth = TRUE;
+            $phpmailer->Username = get_option('pepipost_user');
+            $phpmailer->Password = get_option('pepipost_pass');
     }
 
 		// You can add your own options here, see the phpmailer documentation for more info:
@@ -336,8 +525,26 @@ function wp_mail_smtp_options_page() {
 <tr valign="top">
 <th scope="row"><label for="smtp_pass"><?php _e('Password', 'wp_mail_smtp'); ?></label></th>
 <td>
-  <input name="smtp_pass" type="text" id="smtp_pass" value="<?php print(get_option('smtp_pass')); ?>" size="40" class="code" />
-  <p class="description"><?php printf(esc_html__('This is in plain text because it must be stored encrypted. For more information, click %1$shere%2$s'), '<a href="">', '</a>'); ?>.</p>
+    <?php
+    $saved_password = get_option('smtp_pass');
+    $password_field_type = "text";
+    if(get_option('smtp_encryption_key_enabled') == '1' && WPMS_Simple_Encryption::get_and_check_key() !== false){
+        $decoded = WPMS_Simple_Encryption::decrypt($saved_password, WPMS_Simple_Encryption::get_and_check_key());
+     
+        if($decoded === false){ 
+            $saved_password = "***DECRYPT ERROR***";
+        }else{
+            $password_field_type = "password";
+            $saved_password = $decoded;
+        }
+    }
+    ?>
+  <input name="smtp_pass" type="<?php print($password_field_type); ?>" id="smtp_pass" value="<?php print($saved_password); ?>" size="40" class="code" />
+  <?php if($password_field_type == "text"): ?>
+  <p class="description"><?php printf(esc_html__('This is stored in plain text as reversible password encryption is not enabled. For more information, click %1$shere%2$s'), '<a href="">', '</a>'); ?>.</p>
+  <?php else: ?>
+  <p class="description"><?php printf(esc_html__('This is stored as reversibly-encrypted data so that a plain text password can be presented to the mailserver. For more information, click %1$shere%2$s'), '<a href="">', '</a>'); ?>.</p>
+  <?php endif; ?>
 </td>
 </tr>
 </table>
