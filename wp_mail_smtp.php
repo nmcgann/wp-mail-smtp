@@ -199,7 +199,7 @@ class WPMS_Simple_Encryption{
     
     public static function encrypt_post_vars( $whitelist ){
         //this filter is called in the options.php script and is the only chance to modify $_POST vars
-        //as there are no other hooks
+        //as there are no other hooks ($whitelist is just passed through unmodified)
         if( isset( $_POST['action'] ) && $_POST['action'] == 'update' ){
             
             if(isset( $_POST['smtp_pass'] ) ){
@@ -555,13 +555,17 @@ function wp_mail_smtp_options_page() {
     $saved_password = get_option('smtp_pass');
     $password_field_type = "text";
     if(get_option('smtp_encryption_key_enabled') == '1' && WPMS_Simple_Encryption::get_and_check_key() !== false){
-        $decoded = WPMS_Simple_Encryption::decrypt($saved_password, WPMS_Simple_Encryption::get_and_check_key());
-     
-        if($decoded === false){ 
-            $saved_password = "***DECRYPT ERROR***";
-        }else{
+        if( $saved_password == '' ){
             $password_field_type = "password";
-            $saved_password = $decoded;
+        }else{
+            $decoded = WPMS_Simple_Encryption::decrypt($saved_password, WPMS_Simple_Encryption::get_and_check_key());
+
+            if($decoded === false){ 
+                $saved_password = "***DECRYPT ERROR***";
+            }else{
+                $password_field_type = "password";
+                $saved_password = $decoded;
+            }
         }
     }
     ?>
@@ -593,13 +597,17 @@ function wp_mail_smtp_options_page() {
     $saved_password = get_option('pepipost_pass');
     $password_field_type = "text";
     if(get_option('smtp_encryption_key_enabled') == '1' && WPMS_Simple_Encryption::get_and_check_key() !== false){
-        $decoded = WPMS_Simple_Encryption::decrypt($saved_password, WPMS_Simple_Encryption::get_and_check_key());
-     
-        if($decoded === false){ 
-            $saved_password = "***DECRYPT ERROR***";
-        }else{
+        if( $saved_password == '' ){
             $password_field_type = "password";
-            $saved_password = $decoded;
+        }else{
+            $decoded = WPMS_Simple_Encryption::decrypt($saved_password, WPMS_Simple_Encryption::get_and_check_key());
+
+            if($decoded === false){ 
+                $saved_password = "***DECRYPT ERROR***";
+            }else{
+                $password_field_type = "password";
+                $saved_password = $decoded;
+            }
         }
     }
     ?>
